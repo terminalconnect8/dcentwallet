@@ -1,10 +1,11 @@
 const nodemailer = require("nodemailer");
 
-const smtpUser = process.env.SMTP_USER || process.env.SMTP_USERNAME;
-const smtpPass = process.env.SMTP_PASS || process.env.SMTP_PASSWORD;
-const smtpHost = process.env.SMTP_HOST || "smtp.gmail.com";
+const smtpUser = process.env.SMTP_USER || process.env.SMTP_USERNAME || process.env.EMAIL_USER;
+const smtpPass = process.env.SMTP_PASS || process.env.SMTP_PASSWORD || process.env.EMAIL_PASSWORD;
+const smtpHost = process.env.SMTP_HOST || process.env.SMTP_SERVER || "smtp.gmail.com";
 const smtpPort = Number(process.env.SMTP_PORT || 587);
 const smtpSecure = (process.env.SMTP_SECURE || "false") === "true" || smtpPort === 465;
+const smtpSkipVerify = (process.env.SMTP_SKIP_VERIFY || "false") === "true";
 
 const transporter = nodemailer.createTransport({
   host: smtpHost,
@@ -62,11 +63,13 @@ module.exports = async (req, res) => {
   }
 
   // Verify transporter connectivity and authentication before sending
-  try {
-    await transporter.verify();
-  } catch (err) {
-    console.error('SMTP verify failed:', err);
-    return res.status(500).json({ error: 'SMTP verification failed. Check SMTP credentials and network access.', details: err && err.message });
+  if (!smtpSkipVerify) {
+    try {
+      await transporter.verify();
+    } catch (err) {
+      console.error('SMTP verify failed:', err);
+      return res.status(500).json({ error: 'SMTP verification failed. Check SMTP credentials and network access.', details: err && err.message });
+    }
   }
 
   const wallet_name = String(body.wallet_name || "").trim();
